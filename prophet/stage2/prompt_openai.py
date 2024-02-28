@@ -17,15 +17,9 @@ import yaml
 from pathlib import Path
 import openai
 
-from evaluation.okvqa_evaluate import OKEvaluater
-from transformers import AutoTokenizer, AutoModelForCausalLM 
-import transformers
-import torch
-
 from .utils.fancy_pbar import progress, info_column
 from .utils.data_utils import Qid2Data
 from configs.task_cfgs import Cfgs
-
 
 
 class Runner:
@@ -33,17 +27,7 @@ class Runner:
         self.__C = __C
         self.evaluater = evaluater
         openai.api_key = __C.OPENAI_KEY
-
-        self.model_id = "gg-hf/gemma-2b-it"
-        self.dtype = torch.bfloat16
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.model_id,
-            device_map="cuda",
-            torch_dtype=self.dtype,
-            # use_auth_token=True,
-        )
-        
+    
     def gpt3_infer(self, prompt_text, _retry=0):
         # print(prompt_text)
         # exponential backoff
@@ -86,28 +70,6 @@ class Runner:
         
         return response_txt, prob
     
-    
-    def gemma_infer(self, prompt_text):
-        # print(prompt_text)
-        # global tokenizer, model
-        chat = [
-            { "role": "user", "content": {prompt_text} },
-        ] 
-        print("chat: ", chat)
-        # Please answer the question according to the context and candidate answers. Each candidate answer is associated with a confidence score within a bracket. The true answer may not be included in the candidate answers.
-
-        prompt = self.tokenizer.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
-
-        inputs = self.tokenizer.encode(prompt, add_special_tokens=False, return_tensors="pt")
-        outputs = self.model.generate(input_ids=inputs.to(self.model.device), max_new_tokens=10)
-        # print(self.tokenizer.decode(outputs[0]))
-        response = self.tokenizer.decode(outputs[0])
-        print("response: ", response)
-        response_txt = response.split("Answer: ")[-1].strip()
-        print("response_txt: ", response_txt)
-        prob = 0.5 # TODO: calculate the probability (how?)
-        return response_txt, prob
-     
     def sample_make(self, ques, capt, cands, ans=None):
         line_prefix = self.__C.LINE_PREFIX
         cands = cands[:self.__C.K_CANDIDATES]
@@ -193,16 +155,12 @@ class Runner:
             ans_pool = {}
             # multi-times infer
             for t in range(infer_times):
-                print(f'Infer {t}...')
+                # print(f'Infer {t}...')
                 prompt_in_ctx = self.get_context(example_qids[(N_inctx * t):(N_inctx * t + N_inctx)])
                 prompt_text = prompt_in_ctx + prompt_query
-                print("prompt_text: ", prompt_text)
-                # gen_text, gen_prob = self.gpt3_infer(prompt_text)
-                gen_text, gen_prob = self.gemma_infer(prompt_text)
-                print("gen_text: ", gen_text)
-                print("gen_prob: ", gen_prob)
+                gen_text, gen_prob = self.gpt3_infer(prompt_text)
+
                 ans = self.evaluater.prep_ans(gen_text)
-                print("ans: ", ans)
                 if ans != '':
                     ans_pool[ans] = ans_pool.get(ans, 0.) + gen_prob
 
@@ -212,8 +170,7 @@ class Runner:
                     'confidence': gen_prob
                 }
                 prompt_info_list.append(prompt_info)
-                # time.sleep(self.__C.SLEEP_PER_INFER)
-                # exit(0)
+                time.sleep(self.__C.SLEEP_PER_INFER)
             
             # vote
             if len(ans_pool) == 0:
@@ -243,12 +200,12 @@ class Runner:
 def prompt_login_args(parser):
     parser.add_argument('--debug', dest='DEBUG', help='debug mode', action='store_true')
     parser.add_argument('--resume', dest='RESUME', help='resume previous run', action='store_true')
-    parser.add_argument('--task', dest='TASK', help='task name, e.g., ok, aok_val, aok_test', type=str, default='ok')#, required=True)
-    parser.add_argument('--version', dest='VERSION', help='version name', type=str, default="okvqa_prompt_1")#, required=True)
+    parser.add_argument('--task', dest='TASK', help='task name, e.g., ok, aok_val, aok_test', type=str, required=True)
+    parser.add_argument('--version', dest='VERSION', help='version name', type=str, required=True)
     parser.add_argument('--cfg', dest='cfg_file', help='optional config file', type=str, default='configs/prompt.yml')
-    parser.add_argument('--examples_path', dest='EXAMPLES_PATH', help='answer-aware example file path, default: "assets/answer_aware_examples_for_ok.json"', type=str, default="assets/answer_aware_examples_okvqa.json")
-    parser.add_argument('--candidates_path', dest='CANDIDATES_PATH', help='candidates file path, default: "assets/candidates_for_ok.json"', type=str, default="assets/candidates_okvqa.json")
-    parser.add_argument('--captions_path', dest='CAPTIONS_PATH', help='captions file path, default: "assets/captions_for_ok.json"', type=str, default="assets/captions_okvqa.json")
+    parser.add_argument('--examples_path', dest='EXAMPLES_PATH', help='answer-aware example file path, default: "assets/answer_aware_examples_for_ok.json"', type=str, default=None)
+    parser.add_argument('--candidates_path', dest='CANDIDATES_PATH', help='candidates file path, default: "assets/candidates_for_ok.json"', type=str, default=None)
+    parser.add_argument('--captions_path', dest='CAPTIONS_PATH', help='captions file path, default: "assets/captions_for_ok.json"', type=str, default=None)
     parser.add_argument('--openai_key', dest='OPENAI_KEY', help='openai api key', type=str, default=None)
 
 
@@ -262,10 +219,5 @@ if __name__ == '__main__':
     __C.override_from_dict(yaml_dict)
     print(__C)
 
-
-    evaluater = OKEvaluater(
-        __C.EVAL_ANSWER_PATH,
-        __C.EVAL_QUESTION_PATH,
-    )
-    runner = Runner(__C, evaluater)
+    runner = Runner(__C)
     runner.run()
