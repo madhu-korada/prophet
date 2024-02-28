@@ -1,6 +1,6 @@
 **/__pycache__/
-datasets/*/
-!datasets/.gitkeep
+# datasets/*/
+# !datasets/.gitkeep
 # assets/*
 ckpts/*
 !ckpts/.gitkeep
