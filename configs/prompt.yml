@@ -1,4 +1,5 @@
-MODEL: text-davinci-002
+# MODEL: text-davinci-002
+MODEL: gpt-3.5-turbo-instruct
 TEMPERATURE: 0.
 MAX_TOKENS: 8
 SLEEP_PER_INFER: 10

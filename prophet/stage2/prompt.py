@@ -22,6 +22,7 @@ from .utils.data_utils import Qid2Data
 from configs.task_cfgs import Cfgs
 
 
+
 class Runner:
     def __init__(self, __C, evaluater):
         self.__C = __C
@@ -158,9 +159,12 @@ class Runner:
                 # print(f'Infer {t}...')
                 prompt_in_ctx = self.get_context(example_qids[(N_inctx * t):(N_inctx * t + N_inctx)])
                 prompt_text = prompt_in_ctx + prompt_query
+                print("prompt_text: ", prompt_text)
                 gen_text, gen_prob = self.gpt3_infer(prompt_text)
-
+                print("gen_text: ", gen_text)
+                print("gen_prob: ", gen_prob)
                 ans = self.evaluater.prep_ans(gen_text)
+                print("ans: ", ans)
                 if ans != '':
                     ans_pool[ans] = ans_pool.get(ans, 0.) + gen_prob
 
@@ -171,6 +175,7 @@ class Runner:
                 }
                 prompt_info_list.append(prompt_info)
                 time.sleep(self.__C.SLEEP_PER_INFER)
+                exit(0)
             
             # vote
             if len(ans_pool) == 0:
