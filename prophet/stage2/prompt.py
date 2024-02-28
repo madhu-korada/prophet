@@ -93,7 +93,7 @@ class Runner:
         chat = [
             { "role": "user", "content": {prompt_text} },
         ] 
-        print("chat: ", chat)
+        # print("chat: ", chat)
         # Please answer the question according to the context and candidate answers. Each candidate answer is associated with a confidence score within a bracket. The true answer may not be included in the candidate answers.
 
         prompt = self.tokenizer.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
@@ -105,8 +105,8 @@ class Runner:
         print("response: ", response)
         response_txt = response.split("Answer: ")[-1].strip()
         print("response_txt: ", response_txt)
-        prob = 0.5 # TODO: calculate the probability (how?)
-        return response_txt, prob
+        prob = 1.0 # TODO: calculate the probability (how?)
+        return response_txt, prob, response
      
     def sample_make(self, ques, capt, cands, ans=None):
         line_prefix = self.__C.LINE_PREFIX
@@ -144,12 +144,14 @@ class Runner:
         Path(self.__C.RESULT_DIR).mkdir(parents=True, exist_ok=True)
         
         self.cache = {}
+        self.cache_without_prompt = {}
         self.cache_file_path = os.path.join(
             self.__C.RESULT_DIR,
             'cache.json'
         )
         if self.__C.RESUME:
             self.cache = json.load(open(self.cache_file_path, 'r'))
+            self.cache_without_prompt = json.load(open(self.cache_file_path.replace('.json', '_without_prompt.json'), 'r'))
         
         print('Note that the accuracies printed before final evaluation (the last printed one) are rough, just for checking if the process is normal!!!\n')
         self.trainset = Qid2Data(
@@ -190,15 +192,16 @@ class Runner:
             random.shuffle(example_qids)
 
             prompt_info_list = []
+            prompt_info_full_response_list = []
             ans_pool = {}
             # multi-times infer
             for t in range(infer_times):
-                print(f'Infer {t}...')
+                # print(f'Infer {t}...')
                 prompt_in_ctx = self.get_context(example_qids[(N_inctx * t):(N_inctx * t + N_inctx)])
                 prompt_text = prompt_in_ctx + prompt_query
-                print("prompt_text: ", prompt_text)
+                # print("prompt_text: ", prompt_text)
                 # gen_text, gen_prob = self.gpt3_infer(prompt_text)
-                gen_text, gen_prob = self.gemma_infer(prompt_text)
+                gen_text, gen_prob, full_response = self.gemma_infer(prompt_text)
                 print("gen_text: ", gen_text)
                 print("gen_prob: ", gen_prob)
                 ans = self.evaluater.prep_ans(gen_text)
@@ -211,10 +214,17 @@ class Runner:
                     'answer': gen_text,
                     'confidence': gen_prob
                 }
+                prompt_info_full_response = {
+                    # 'prompt': prompt_text,
+                    'answer': gen_text,
+                    'confidence': gen_prob,
+                    'full_response': full_response
+                }
                 prompt_info_list.append(prompt_info)
+                prompt_info_full_response_list.append(prompt_info_full_response)
                 # time.sleep(self.__C.SLEEP_PER_INFER)
                 # exit(0)
-            
+            print("\n\n")
             # vote
             if len(ans_pool) == 0:
                 answer = self.valset.get_topk_candidates(qid, 1)[0]['answer']
@@ -227,8 +237,14 @@ class Runner:
                 'answer': answer,
                 'prompt_info': prompt_info_list
             }
+            self.cache_without_prompt[qid] = {
+                'question_id': qid,
+                'answer': answer,
+                'prompt_info': prompt_info_full_response_list
+            }
             json.dump(self.cache, open(self.cache_file_path, 'w'))
-
+            json.dump(self.cache_without_prompt, open(self.cache_file_path.replace('.json', '_without_prompt.json'), 'w'))
+            
             ll = len(self.cache)
             if self.__C.EVAL_NOW and not self.__C.DEBUG:
                 if ll > 21 and ll % 10 == 0:
