@@ -8,8 +8,10 @@ outputs/ckpts/*
 !outputs/ckpts/.gitkeep
 outputs/logs/*
 !outputs/logs/.gitkeep
-outputs/results/*
-!outputs/results/.gitkeep
+# outputs/results/*
+# !outputs/results/.gitkeep
 preds/*
 !preds/.gitkeep
 tmp
+outputs/results/okvqa_prompt_1/*
+outputs/results/okvqa_prompt_1_gemma2b/split_cache/
