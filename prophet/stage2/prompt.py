@@ -34,7 +34,8 @@ class Runner:
         self.evaluater = evaluater
         openai.api_key = __C.OPENAI_KEY
 
-        self.model_id = "gg-hf/gemma-2b-it"
+        # self.model_id = "gg-hf/gemma-2b-it"
+        self.model_id = "mistralai/Mistral-7B-Instruct-v0.2"
         self.dtype = torch.bfloat16
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
         self.model = AutoModelForCausalLM.from_pretrained(
@@ -45,7 +46,6 @@ class Runner:
         )
         
     def gpt3_infer(self, prompt_text, _retry=0):
-        # print(prompt_text)
         # exponential backoff
         if _retry > 0:
             print('retrying...')
@@ -76,7 +76,6 @@ class Runner:
             return self.gpt3_infer(prompt_text, _retry + 1)
 
         response_txt = response.choices[0].text.strip()
-        # print(response_txt)
         plist = []
         for ii in range(len(response['choices'][0]['logprobs']['tokens'])):
             if response['choices'][0]['logprobs']['tokens'][ii] in ["\n", "<|endoftext|>"]:
@@ -88,14 +87,9 @@ class Runner:
     
     
     def gemma_infer(self, prompt_text):
-        # print(prompt_text)
-        # global tokenizer, model
         chat = [
             { "role": "user", "content": {prompt_text} },
         ] 
-        # print("chat: ", chat)
-        # Please answer the question according to the context and candidate answers. Each candidate answer is associated with a confidence score within a bracket. The true answer may not be included in the candidate answers.
-
         prompt = self.tokenizer.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
 
         inputs = self.tokenizer.encode(prompt, add_special_tokens=False, return_tensors="pt")
@@ -107,7 +101,27 @@ class Runner:
         print("response_txt: ", response_txt)
         prob = 1.0 # TODO: calculate the probability (how?)
         return response_txt, prob, response
-     
+    
+    def mistral_infer(self, prompt_text):
+        # print(prompt_text)
+        # global tokenizer, model
+        chat = [
+            {"role": "user", "content": prompt_text}
+        ] 
+        prompt = self.tokenizer.apply_chat_template(chat,  return_tensors="pt")
+        inputs = prompt.to(self.model.device) 
+        outputs = self.model.generate(input_ids=inputs, max_new_tokens=1000, do_sample=True) 
+        response = self.tokenizer.batch_decode(outputs)
+        response = response[0]
+        response_txt = response.split("Answer: [/INST] ")[-1].strip()
+        response_txt = response_txt.split("</s>")[0]
+        response_txt = response_txt.split("\n")[0]
+        response_txt = response_txt.replace(".", "")
+        print("response_txt: ", response_txt)
+        print('\n\n')
+        prob = 1 # TODO: calculate the probability (how?)
+        return response_txt, prob, response
+
     def sample_make(self, ques, capt, cands, ans=None):
         line_prefix = self.__C.LINE_PREFIX
         cands = cands[:self.__C.K_CANDIDATES]
@@ -135,7 +149,7 @@ class Runner:
             prompt_text += '\n\n'
         return prompt_text
     
-    def run(self):
+    def run(self, write_only_prompt=False):
         ## where logs will be saved
         Path(self.__C.LOG_PATH).parent.mkdir(parents=True, exist_ok=True)
         with open(self.__C.LOG_PATH, 'w') as f:
@@ -201,27 +215,36 @@ class Runner:
                 prompt_text = prompt_in_ctx + prompt_query
                 # print("prompt_text: ", prompt_text)
                 # gen_text, gen_prob = self.gpt3_infer(prompt_text)
-                gen_text, gen_prob, full_response = self.gemma_infer(prompt_text)
-                print("gen_text: ", gen_text)
-                print("gen_prob: ", gen_prob)
-                ans = self.evaluater.prep_ans(gen_text)
-                print("ans: ", ans)
-                if ans != '':
-                    ans_pool[ans] = ans_pool.get(ans, 0.) + gen_prob
+                if write_only_prompt:
+                    prompt_info = {
+                        'prompt': prompt_text,
+                        'answer': '',
+                        'confidence': 0
+                    }
+                    prompt_info_list.append(prompt_info)
+                else:
+                    gen_text, gen_prob, full_response = self.gemma_infer(prompt_text)
+                    # gen_text, gen_prob, full_response = self.mistral_infer(prompt_text)
+                    print("gen_text: ", gen_text)
+                    print("gen_prob: ", gen_prob)
+                    ans = self.evaluater.prep_ans(gen_text)
+                    print("ans: ", ans)
+                    if ans != '':
+                        ans_pool[ans] = ans_pool.get(ans, 0.) + gen_prob
 
-                prompt_info = {
-                    'prompt': prompt_text,
-                    'answer': gen_text,
-                    'confidence': gen_prob
-                }
-                prompt_info_full_response = {
-                    # 'prompt': prompt_text,
-                    'answer': gen_text,
-                    'confidence': gen_prob,
-                    'full_response': full_response
-                }
-                prompt_info_list.append(prompt_info)
-                prompt_info_full_response_list.append(prompt_info_full_response)
+                    prompt_info = {
+                        'prompt': prompt_text,
+                        'answer': gen_text,
+                        'confidence': gen_prob
+                    }
+                    prompt_info_full_response = {
+                        # 'prompt': prompt_text,
+                        'answer': gen_text,
+                        'confidence': gen_prob,
+                        'full_response': full_response
+                    }
+                    prompt_info_list.append(prompt_info)
+                    prompt_info_full_response_list.append(prompt_info_full_response)
                 # time.sleep(self.__C.SLEEP_PER_INFER)
                 # exit(0)
             print("\n\n")
@@ -284,4 +307,4 @@ if __name__ == '__main__':
         __C.EVAL_QUESTION_PATH,
     )
     runner = Runner(__C, evaluater)
-    runner.run()
+    runner.run(write_only_prompt=False)
